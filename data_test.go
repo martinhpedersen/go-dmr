@@ -14,15 +14,14 @@ func TestDataBlock(t *testing.T) {
 		Data:   []byte{0x17, 0x2a},
 		Length: 2,
 	}
+	wantSize := 18
 
 	data := want.Bytes(Rate34Data, true)
 	if data == nil {
 		t.Fatal("encode failed")
 	}
-	// Size is the user-data + two octets of serial/crc
-	size := int(dataBlockLength(Rate34Data, true)) + 2
-	if len(data) != size {
-		t.Fatalf("encode failed: expected %d bytes, got %d", size, len(data))
+	if len(data) != wantSize {
+		t.Fatalf("encode failed: expected %d bytes, got %d", wantSize, len(data))
 	}
 
 	// Decoding is tested in the DataFragment test

@@ -39,6 +39,12 @@ func calculateCRC9(serial uint8, data []byte, dataType uint8) (crc uint16) {
 	return crc
 }
 
+var dataBlockLengths = map[uint8]int{
+	Rate12Data: 12,
+	Rate34Data: 18,
+	Data:       22,
+}
+
 type DataBlock struct {
 	Serial uint8
 	CRC    uint16
@@ -51,7 +57,7 @@ func ParseDataBlock(data []byte, dataType uint8, confirmed bool) (*DataBlock, er
 	var (
 		crc uint16
 		db  = &DataBlock{
-			Length: dataBlockLength(dataType, confirmed),
+			Length: uint8(userDataLength(dataType, confirmed)),
 		}
 	)
 
@@ -77,16 +83,10 @@ func ParseDataBlock(data []byte, dataType uint8, confirmed bool) (*DataBlock, er
 }
 
 func (db *DataBlock) Bytes(dataType uint8, confirmed bool) []byte {
-	var (
-		size = dataBlockLength(dataType, confirmed)
-		data = make([]byte, size)
-	)
+	data := make([]byte, dataBlockLengths[dataType])
 
 	if confirmed {
 		db.CRC = calculateCRC9(db.Serial, db.Data, dataType)
-
-		// Grow data slice to support the two byte prefix
-		data = append(data, make([]byte, 2)...)
 
 		data[0] = (db.Serial << 1) | (uint8(db.CRC>>8) & 0x01)
 		data[1] = uint8(db.CRC)
@@ -98,25 +98,10 @@ func (db *DataBlock) Bytes(dataType uint8, confirmed bool) []byte {
 	return data
 }
 
-func dataBlockLength(dataType uint8, confirmed bool) uint8 {
-	var size uint8
-
-	switch dataType {
-	case Data:
-		size = 22
-		break
-	case Rate12Data:
-		size = 10
-		break
-	case Rate34Data:
-		size = 16
-		break
-	default:
-		return 0
-	}
-
-	if !confirmed {
-		return size + 2
+func userDataLength(dataType uint8, confirmed bool) int {
+	size, ok := dataBlockLengths[dataType]
+	if ok && confirmed {
+		return size - 2
 	}
 	return size
 }
@@ -135,16 +120,16 @@ func (df *DataFragment) DataBlocks(dataType uint8, confirm bool) ([]*DataBlock, 
 	}
 
 	// See DMR AI spec. page. 73. for block sizes.
-	var size = int(dataBlockLength(dataType, confirm))
-	df.Needed = (df.Stored + size - 1) / size
+	blockCap := userDataLength(dataType, confirm)
+	df.Needed = (df.Stored + blockCap - 1) / blockCap
 
 	// Leave enough room for the 4 bytes CRC32
-	if (df.Needed*size)-df.Stored < 4 {
+	if (df.Needed*blockCap)-df.Stored < 4 {
 		df.Needed++
 	}
 
 	// Calculate fragment CRC32
-	for i := 0; i < (df.Needed*size)-4; i += 2 {
+	for i := 0; i < (df.Needed*blockCap)-4; i += 2 {
 		if i+1 < df.Stored {
 			crc32(&df.CRC, df.Data[i+1])
 		} else {
@@ -165,7 +150,7 @@ func (df *DataFragment) DataBlocks(dataType uint8, confirm bool) ([]*DataBlock, 
 	for i := range blocks {
 		block := &DataBlock{
 			Serial: uint8(i % 128),
-			Length: dataBlockLength(dataType, confirm),
+			Length: uint8(blockCap),
 		}
 		block.Data = make([]byte, block.Length)
 
